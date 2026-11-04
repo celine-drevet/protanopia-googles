@@ -21,9 +21,8 @@
       background: var(--bg); color: var(--fg);
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       -webkit-tap-highlight-color: transparent;
-      touch-action: none;
     }
-    #gl { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; }
+    #gl { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; touch-action: none; }
     video { display: none; }
 
     /* Écran d'accueil */
@@ -76,7 +75,7 @@
     /* Séparateur du mode comparaison */
     #divider {
       position: fixed; top: 0; bottom: 0; width: 44px; margin-left: -22px;
-      display: none; cursor: ew-resize;
+      display: none; cursor: ew-resize; touch-action: none;
     }
     #divider.on { display: block; }
     #divider::before {
@@ -96,6 +95,40 @@
     .label.on { display: block; }
     #lblLeft { left: 6px; transform: translateY(-50%) rotate(180deg); }
     #lblRight { right: 6px; }
+
+    /* Caméra en pause (autre onglet, interruption…) */
+    #paused {
+      position: fixed; inset: 0; display: none; flex-direction: column; gap: 16px;
+      align-items: center; justify-content: center; text-align: center; padding: 24px 16px;
+      background: rgba(0, 0, 0, .82);
+    }
+    #paused.on { display: flex; }
+    #paused p { margin: 0; max-width: 28rem; color: var(--muted); line-height: 1.45; }
+
+    /* Panneau d'explications */
+    .link { background: none; border: 0; padding: 4px; color: var(--accent); text-decoration: underline; }
+    dialog {
+      width: min(40rem, calc(100vw - 32px)); max-height: calc(100dvh - 32px);
+      padding: 0; border: 1px solid var(--border); border-radius: 16px;
+      background: #141414; color: var(--fg); overflow: hidden;
+    }
+    dialog::backdrop { background: rgba(0, 0, 0, .6); }
+    dialog[open] { display: flex; flex-direction: column; }
+    dialog header {
+      display: flex; justify-content: space-between; align-items: center; gap: 12px;
+      padding: 14px 16px; border-bottom: 1px solid var(--border);
+    }
+    dialog header h2 { margin: 0; font-size: 1.15rem; }
+    dialog .content {
+      overflow-y: auto; padding: 4px 16px 20px; line-height: 1.5; font-size: .95rem;
+      touch-action: pan-y; -webkit-overflow-scrolling: touch;
+    }
+    dialog h3 { margin: 20px 0 6px; font-size: 1rem; color: var(--accent); }
+    dialog p, dialog ul { margin: 0 0 8px; }
+    dialog ul { padding-left: 1.2em; }
+    dialog li { margin-bottom: 4px; }
+    dialog a { color: var(--accent); }
+    dialog .note { font-size: .82rem; color: var(--muted); }
   </style>
 </head>
 <body>
@@ -111,6 +144,7 @@
     <h1>Protanopia Goggles</h1>
     <p>Regardez le monde à travers la caméra de votre téléphone comme le voit une personne atteinte de <strong>protanopie</strong> (absence de cônes sensibles au rouge). La simulation utilise le modèle de Brettel, Viénot &amp; Mollon (1997), tel qu'implémenté par <a href="https://daltonlens.org/colorblindness-simulator" style="color:var(--accent)">DaltonLens</a>.</p>
     <button id="start" class="primary">Ouvrir la caméra</button>
+    <button class="link" data-open-info>Comment ça marche ? Est-ce fiable ?</button>
     <p id="error" role="alert"></p>
     <p style="font-size:.8rem">Les images ne quittent jamais votre téléphone : tout le traitement se fait localement.</p>
   </section>
@@ -122,6 +156,7 @@
         <button data-view="split" aria-pressed="false">Comparer</button>
         <button data-view="cvd" aria-pressed="true">Protanopie</button>
       </div>
+      <button class="icon" data-open-info title="Explications" aria-label="Explications">?</button>
     </div>
     <div id="divider" aria-label="Séparateur"></div>
     <div id="lblLeft" class="label">Vision normale</div>
@@ -142,6 +177,55 @@
       </div>
     </div>
   </div>
+
+  <section id="paused" role="alert">
+    <p id="pausedMsg">Caméra en pause.</p>
+    <button id="resume" class="primary">Reprendre la caméra</button>
+  </section>
+
+  <dialog id="info" aria-labelledby="infoTitle">
+    <header>
+      <h2 id="infoTitle">Comment ça marche ?</h2>
+      <button class="icon" id="closeInfo" aria-label="Fermer">✕</button>
+    </header>
+    <div class="content">
+      <h3>La protanopie, c'est quoi ?</h3>
+      <p>Notre œil possède trois types de cônes, sensibles au rouge, au vert et au bleu. Chez une personne protanope, les cônes « rouges » sont absents. Environ 1&nbsp;% des hommes sont concernés (beaucoup plus rarement les femmes).</p>
+      <p>Résultat : le rouge, l'orange, le jaune et le vert se ressemblent, le violet paraît bleu et les rouges paraissent nettement plus sombres.</p>
+
+      <h3>Comment fonctionne la simulation ?</h3>
+      <p>Pour chaque pixel de la caméra, on calcule la réponse des trois cônes, on supprime l'information que les cônes rouges auraient apportée, puis on reconstruit la couleur équivalente. Tout est calculé sur votre téléphone : aucune image n'est envoyée.</p>
+      <p>Le calcul reprend celui du simulateur <a href="https://daltonlens.org/colorblindness-simulator" target="_blank" rel="noopener">DaltonLens</a>, issu de travaux scientifiques publiés.</p>
+
+      <h3>Brettel ou Viénot ?</h3>
+      <ul>
+        <li><strong>Brettel (1997)</strong> : le modèle de référence, le plus précis. C'est celui utilisé par défaut.</li>
+        <li><strong>Viénot (1999)</strong> : une version simplifiée du même modèle, conçue pour être plus rapide. Pour la protanopie, la différence est très faible.</li>
+      </ul>
+
+      <h3>Et le curseur de sévérité ?</h3>
+      <p>À 100&nbsp;%, il simule une protanopie complète. En dessous, il mélange simplement l'image normale et l'image simulée : c'est une approximation pratique de la <em>protanomalie</em> (cônes rouges présents mais moins efficaces), pas un modèle scientifique précis.</p>
+
+      <h3>Peut-on s'y fier ?</h3>
+      <p><strong>Oui pour</strong> comprendre quelles couleurs se confondent, sensibiliser, ou vérifier qu'un code couleur (signalétique, graphique, interface) reste lisible.</p>
+      <p><strong>Avec prudence</strong>, car :</p>
+      <ul>
+        <li>la caméra ne voit pas les couleurs exactement comme un œil et corrige automatiquement l'image (balance des blancs, exposition) ;</li>
+        <li>l'écran du téléphone a lui aussi ses propres limites ;</li>
+        <li>la simulation montre quelles couleurs sont confondues, pas exactement ce que ressent la personne ;</li>
+        <li>chaque personne daltonienne est différente : il existe de nombreux degrés entre vision normale et protanopie complète.</li>
+      </ul>
+      <p><strong>Ce n'est pas un outil de diagnostic.</strong> En cas de doute, consultez un ophtalmologiste ou un orthoptiste.</p>
+
+      <h3>Sources</h3>
+      <ul class="note">
+        <li>H. Brettel, F. Viénot, J. Mollon, « Computerized simulation of color appearance for dichromats », <em>JOSA A</em>, 1997.</li>
+        <li>F. Viénot, H. Brettel, J. Mollon, « Digital video colourmaps for checking the legibility of displays by dichromats », <em>Color Research &amp; Application</em>, 1999.</li>
+        <li><a href="https://github.com/DaltonLens/libDaltonLens" target="_blank" rel="noopener">libDaltonLens</a> (domaine public) et <a href="https://daltonlens.org/understanding-cvd-simulation/" target="_blank" rel="noopener">l'article explicatif de DaltonLens</a>.</li>
+        <li><a href="https://github.com/celine-drevet/protanopia-googles" target="_blank" rel="noopener">Code source de ce site</a>.</li>
+      </ul>
+    </div>
+  </dialog>
 
   <script src="app.js"></script>
 </body>

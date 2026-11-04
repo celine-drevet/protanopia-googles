@@ -103,6 +103,8 @@ const state = {
   split: 0.5,
   facing: 'environment',
   stream: null,
+  started: false,
+  request: 0,
 };
 
 let gl, prog, tex, loc = {};
@@ -186,20 +188,97 @@ function loop() {
   requestAnimationFrame(loop);
 }
 
-async function startCamera() {
+// ---- Gestion de la caméra ----
+//
+// Sur mobile, une seule page peut utiliser la caméra à la fois. Avec deux
+// onglets ouverts, celui en arrière-plan gardait la caméra et l'autre restait
+// noir. On libère donc la caméra dès que l'onglet est masqué, et un onglet qui
+// démarre la caméra demande aux autres onglets du site de la libérer.
+
+const tabId = Math.random().toString(36).slice(2);
+const channel = 'BroadcastChannel' in window ? new BroadcastChannel('protanopia-camera') : null;
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const pausedEl = $('#paused');
+
+function stopCamera() {
   if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: false,
-    video: {
-      facingMode: { ideal: state.facing },
-      width: { ideal: 1920 },
-      height: { ideal: 1080 },
-    },
-  });
+  state.stream = null;
+  video.srcObject = null;
+}
+
+function showPaused(message) {
+  stopCamera();
+  $('#pausedMsg').textContent = message;
+  pausedEl.classList.add('on');
+}
+
+async function startCamera() {
+  channel?.postMessage({ type: 'claim', id: tabId });
+  stopCamera();
+  const request = ++state.request;
+
+  // La caméra peut mettre un instant à être libérée par l'autre onglet :
+  // on réessaie quelques fois si elle est encore occupée.
+  let stream, lastErr;
+  for (let attempt = 0; attempt < 5 && !stream; attempt++) {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          facingMode: { ideal: state.facing },
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+        },
+      });
+    } catch (err) {
+      lastErr = err;
+      if (!['NotReadableError', 'AbortError', 'TrackStartError'].includes(err.name)) throw err;
+      await sleep(300 * (attempt + 1));
+    }
+  }
+  if (!stream) throw lastErr;
+
+  // Un appel plus récent (changement de caméra, retour sur l'onglet…) a pris le relais.
+  if (request !== state.request || document.hidden) {
+    stream.getTracks().forEach((t) => t.stop());
+    return;
+  }
+
   state.stream = stream;
+  stream.getVideoTracks().forEach((t) => t.addEventListener('ended', () => {
+    if (state.stream === stream) showPaused('La caméra a été interrompue.');
+  }));
   video.srcObject = stream;
   await video.play();
+  pausedEl.classList.remove('on');
 }
+
+async function resumeCamera() {
+  try {
+    await startCamera();
+  } catch (err) {
+    console.error(err);
+    showPaused(explain(err));
+  }
+}
+
+channel?.addEventListener('message', (e) => {
+  if (e.data?.type === 'claim' && e.data.id !== tabId && state.started) {
+    showPaused('La caméra est utilisée dans un autre onglet.');
+  }
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!state.started) return;
+  if (document.hidden) {
+    state.request++; // annule un démarrage en cours
+    stopCamera();
+  } else {
+    resumeCamera();
+  }
+});
+window.addEventListener('pagehide', stopCamera);
+$('#resume').addEventListener('click', resumeCamera);
 
 function explain(err) {
   if (!window.isSecureContext) return 'La caméra nécessite une connexion HTTPS.';
@@ -207,7 +286,7 @@ function explain(err) {
   switch (err?.name) {
     case 'NotAllowedError': return "Accès à la caméra refusé. Autorisez-le dans les réglages du navigateur puis réessayez.";
     case 'NotFoundError': return 'Aucune caméra trouvée sur cet appareil.';
-    case 'NotReadableError': return 'La caméra est déjà utilisée par une autre application.';
+    case 'NotReadableError': return 'La caméra est déjà utilisée par une autre application ou un autre onglet. Fermez-la puis réessayez.';
     default: return `Impossible de démarrer : ${err?.message || err}`;
   }
 }
@@ -262,8 +341,15 @@ divider.addEventListener('pointerdown', (e) => {
 
 $('#flip').addEventListener('click', async () => {
   state.facing = state.facing === 'environment' ? 'user' : 'environment';
-  try { await startCamera(); } catch (err) { alert(explain(err)); }
+  await resumeCamera();
 });
+
+// ---- Panneau d'explications ----
+const info = $('#info');
+document.querySelectorAll('[data-open-info]').forEach((b) =>
+  b.addEventListener('click', () => info.showModal()));
+$('#closeInfo').addEventListener('click', () => info.close());
+info.addEventListener('click', (e) => { if (e.target === info) info.close(); });
 
 $('#snap').addEventListener('click', () => {
   // Redessine puis capture dans la même tâche (le buffer WebGL n'est pas conservé).
@@ -290,6 +376,8 @@ $('#start').addEventListener('click', async () => {
   try {
     if (!gl) initGL();
     await startCamera();
+    if (state.started) return;
+    state.started = true;
     intro.style.display = 'none';
     ui.classList.add('on');
     setView(state.view);
