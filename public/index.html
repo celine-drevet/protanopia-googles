@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#000000">
+  <meta name="description" content="Voir le monde en direct à travers la caméra de son téléphone comme une personne atteinte de protanopie.">
+  <title>Protanopia Goggles</title>
+  <style>
+    :root {
+      --bg: #000;
+      --fg: #fff;
+      --muted: rgba(255, 255, 255, .7);
+      --panel: rgba(20, 20, 20, .72);
+      --accent: #f5c518;
+      --border: rgba(255, 255, 255, .18);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; height: 100%; overflow: hidden;
+      background: var(--bg); color: var(--fg);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+    }
+    #gl { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; }
+    video { display: none; }
+
+    /* Écran d'accueil */
+    #intro {
+      position: fixed; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; text-align: center;
+      padding: 24px 16px; gap: 16px;
+      background: radial-gradient(circle at 30% 20%, #3a2a00 0%, #000 65%);
+    }
+    #intro h1 { margin: 0; font-size: clamp(1.6rem, 6vw, 2.4rem); }
+    #intro p { margin: 0; max-width: 34rem; color: var(--muted); line-height: 1.45; }
+    #intro .swatches { display: flex; gap: 6px; }
+    #intro .swatches span { width: 28px; height: 28px; border-radius: 50%; }
+    #error { color: #ff8a80; min-height: 1.2em; }
+    button {
+      font: inherit; color: var(--fg); background: var(--panel);
+      border: 1px solid var(--border); border-radius: 999px;
+      padding: 10px 16px; cursor: pointer;
+    }
+    button.primary {
+      background: var(--accent); color: #000; border: 0; font-weight: 700;
+      padding: 14px 28px; font-size: 1.1rem;
+    }
+
+    /* Interface en direct */
+    #ui { display: none; }
+    #ui.on { display: block; }
+    .top, .bottom {
+      position: fixed; left: 0; right: 0; display: flex; justify-content: center;
+      gap: 8px; padding: 12px 16px; flex-wrap: wrap; pointer-events: none;
+    }
+    .top { top: 0; padding-top: max(12px, env(safe-area-inset-top)); }
+    .bottom { bottom: 0; padding-bottom: max(16px, env(safe-area-inset-bottom)); flex-direction: column; align-items: center; }
+    .top > *, .bottom > * { pointer-events: auto; }
+    .seg {
+      display: inline-flex; background: var(--panel); border: 1px solid var(--border);
+      border-radius: 999px; padding: 3px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    }
+    .seg button { border: 0; background: transparent; padding: 8px 14px; font-size: .95rem; }
+    .seg button[aria-pressed="true"] { background: var(--fg); color: #000; font-weight: 600; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center; }
+    .slider {
+      display: flex; align-items: center; gap: 10px; background: var(--panel);
+      border: 1px solid var(--border); border-radius: 999px; padding: 8px 16px;
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); font-size: .9rem;
+    }
+    .slider input { width: 140px; accent-color: var(--accent); }
+    .icon { width: 44px; height: 44px; padding: 0; display: inline-grid; place-items: center; font-size: 1.2rem; }
+
+    /* Séparateur du mode comparaison */
+    #divider {
+      position: fixed; top: 0; bottom: 0; width: 44px; margin-left: -22px;
+      display: none; cursor: ew-resize;
+    }
+    #divider.on { display: block; }
+    #divider::before {
+      content: ""; position: absolute; left: 21px; top: 0; bottom: 0; width: 2px; background: #fff;
+      box-shadow: 0 0 6px rgba(0, 0, 0, .6);
+    }
+    #divider::after {
+      content: "⇆"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+      width: 40px; height: 40px; border-radius: 50%; background: #fff; color: #000;
+      display: grid; place-items: center; font-size: 1.1rem;
+    }
+    .label {
+      position: fixed; top: 50%; transform: translateY(-50%); writing-mode: vertical-rl;
+      font-size: .8rem; letter-spacing: .08em; text-transform: uppercase;
+      background: var(--panel); padding: 10px 4px; border-radius: 6px; display: none;
+    }
+    .label.on { display: block; }
+    #lblLeft { left: 6px; transform: translateY(-50%) rotate(180deg); }
+    #lblRight { right: 6px; }
+  </style>
+</head>
+<body>
+  <canvas id="gl"></canvas>
+  <video id="video" playsinline muted autoplay></video>
+
+  <section id="intro">
+    <div class="swatches" aria-hidden="true">
+      <span style="background:#e53935"></span><span style="background:#43a047"></span>
+      <span style="background:#fb8c00"></span><span style="background:#8e24aa"></span>
+      <span style="background:#1e88e5"></span>
+    </div>
+    <h1>Protanopia Goggles</h1>
+    <p>Regardez le monde à travers la caméra de votre téléphone comme le voit une personne atteinte de <strong>protanopie</strong> (absence de cônes sensibles au rouge). La simulation utilise le modèle de Brettel, Viénot &amp; Mollon (1997), tel qu'implémenté par <a href="https://daltonlens.org/colorblindness-simulator" style="color:var(--accent)">DaltonLens</a>.</p>
+    <button id="start" class="primary">Ouvrir la caméra</button>
+    <p id="error" role="alert"></p>
+    <p style="font-size:.8rem">Les images ne quittent jamais votre téléphone : tout le traitement se fait localement.</p>
+  </section>
+
+  <div id="ui">
+    <div class="top">
+      <div class="seg" role="group" aria-label="Vue">
+        <button data-view="normal" aria-pressed="false">Normal</button>
+        <button data-view="split" aria-pressed="false">Comparer</button>
+        <button data-view="cvd" aria-pressed="true">Protanopie</button>
+      </div>
+    </div>
+    <div id="divider" aria-label="Séparateur"></div>
+    <div id="lblLeft" class="label">Vision normale</div>
+    <div id="lblRight" class="label">Protanopie</div>
+    <div class="bottom">
+      <div class="slider">
+        <label for="severity">Sévérité</label>
+        <input id="severity" type="range" min="0" max="100" value="100">
+        <output id="sevOut">100&nbsp;%</output>
+      </div>
+      <div class="row">
+        <div class="seg" role="group" aria-label="Algorithme">
+          <button data-algo="0" aria-pressed="true" title="Brettel 1997 — le plus précis">Brettel</button>
+          <button data-algo="1" aria-pressed="false" title="Viénot 1999 — plus simple">Viénot</button>
+        </div>
+        <button id="flip" class="icon" title="Changer de caméra" aria-label="Changer de caméra">⟲</button>
+        <button id="snap" class="icon" title="Prendre une photo" aria-label="Prendre une photo">📷</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
